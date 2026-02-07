@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ทุบตุ๊กตา 3D คู่เดือด</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Kanit', sans-serif;
+            overflow: hidden;
+            touch-action: none;
+            background-color: #1a202c;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none; /* Prevent iOS callout */
+        }
+        #game-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+        .interactive {
+            pointer-events: auto;
+        }
+        .rotated-ui {
+            transform: rotate(180deg);
+        }
+        .hammer-btn {
+            transition: transform 0.1s;
+        }
+        .hammer-btn:active {
+            transform: scale(0.9);
+        }
+        .hammer-selected {
+            border: 4px solid #FCD34D;
+            box-shadow: 0 0 10px #FCD34D;
+        }
+        
+        #menu-screen, #game-over-screen {
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(5px);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container"></div>
+
+    <!-- Game UI Overlay -->
+    <div id="game-ui" class="ui-layer hidden flex flex-col justify-between p-2">
+        <!-- Player 2 Score (Top/Rotated) -->
+        <div class="rotated-ui flex justify-between items-end pb-2 border-b border-white/20">
+            <div class="text-white p-2">
+                <div class="text-sm opacity-75">ผู้เล่น 2</div>
+                <div class="text-4xl font-bold text-red-400" id="score-p2">0</div>
+            </div>
+            <div class="text-white text-right p-2">
+                <div class="text-xs opacity-50">คอมโบ</div>
+                <div class="text-2xl font-bold text-yellow-400" id="combo-p2">x0</div>
+            </div>
+        </div>
+
+        <!-- Timer -->
+        <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none z-20">
+            <div class="bg-gray-800/90 text-white rounded-full w-20 h-20 flex items-center justify-center border-4 border-gray-600 shadow-xl">
+                <span id="game-timer" class="text-3xl font-bold">60</span>
+            </div>
+        </div>
+
+        <!-- Player 1 Score (Bottom) -->
+        <div class="flex justify-between items-start pt-2 border-t border-white/20">
+            <div class="text-white p-2">
+                <div class="text-sm opacity-75">ผู้เล่น 1</div>
+                <div class="text-4xl font-bold text-blue-400" id="score-p1">0</div>
+            </div>
+            <div class="text-white text-right p-2">
+                <div class="text-xs opacity-50">คอมโบ</div>
+                <div class="text-2xl font-bold text-yellow-400" id="combo-p1">x0</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Menu -->
+    <div id="menu-screen" class="ui-layer interactive flex flex-col items-center justify-center z-50 px-4">
+        
+        <!-- P2 Selection -->
+        <div class="rotated-ui w-full max-w-sm p-4 bg-gray-800 rounded-xl mb-8 text-center border border-red-500/30 shadow-lg">
+            <h2 class="text-lg text-red-400 font-bold mb-2">ผู้เล่น 2 (ฝั่งบน)</h2>
+            <div class="flex justify-center gap-3" id="p2-hammer-select">
+                <button class="hammer-btn w-14 h-14 rounded-lg bg-red-600 border-2 border-transparent hammer-selected" data-color="0xFF4444" onclick="selectHammer(2, this)"></button>
+                <button class="hammer-btn w-14 h-14 rounded-lg bg-purple-600 border-2 border-transparent" data-color="0x9F44FF" onclick="selectHammer(2, this)"></button>
+                <button class="hammer-btn w-14 h-14 rounded-lg bg-orange-500 border-2 border-transparent" data-color="0xFF8800" onclick="selectHammer(2, this)"></button>
+            </div>
+        </div>
+
+        <!-- Start Button -->
+        <div class="my-2 z-50">
+            <button onclick="startGame()" class="w-64 py-5 bg-green-500 active:bg-green-600 text-white font-bold rounded-full text-3xl shadow-lg transform transition active:scale-95 border-4 border-green-700">
+                เริ่มเกม!
+            </button>
+        </div>
+
+        <!-- P1 Selection -->
+        <div class="w-full max-w-sm p-4 bg-gray-800 rounded-xl mt-8 text-center border border-blue-500/30 shadow-lg">
+            <h2 class="text-lg text-blue-400 font-bold mb-2">ผู้เล่น 1 (ฝั่งล่าง)</h2>
+            <div class="flex justify-center gap-3" id="p1-hammer-select">
+                <button class="hammer-btn w-14 h-14 rounded-lg bg-blue-600 border-2 border-transparent hammer-selected" data-color="0x4444FF" onclick="selectHammer(1, this)"></button>
+                <button class="hammer-btn w-14 h-14 rounded-lg bg-teal-500 border-2 border-transparent" data-color="0x2DD4BF" onclick="selectHammer(1, this)"></button>
+                <button class="hammer-btn w-14 h-14 rounded-lg bg-pink-500 border-2 border-transparent" data-color="0xEC4899" onclick="selectHammer(1, this)"></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over-screen" class="ui-layer interactive hidden flex flex-col items-center justify-center z-50 text-white px-4">
+        <h1 class="text-5xl font-bold mb-6 text-yellow-400 drop-shadow-md">หมดเวลา!</h1>
+        
+        <div class="flex flex-col w-full max-w-sm gap-4">
+            <div class="rotated-ui bg-gray-800 p-4 rounded-lg text-center border border-gray-600">
+                <h3 class="text-red-400 font-bold text-xl">ผู้เล่น 2</h3>
+                <p class="text-4xl font-bold" id="final-score-p2">0</p>
+            </div>
+
+            <div class="text-center py-4">
+                <h2 class="text-3xl font-bold mb-4" id="winner-text">เสมอ!</h2>
+                <button onclick="resetGame()" class="px-8 py-4 bg-white text-gray-900 font-bold rounded-full text-xl shadow hover:bg-gray-200">เล่นใหม่</button>
+            </div>
+
+            <div class="bg-gray-800 p-4 rounded-lg text-center border border-gray-600">
+                <h3 class="text-blue-400 font-bold text-xl">ผู้เล่น 1</h3>
+                <p class="text-4xl font-bold" id="final-score-p1">0</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Game Config & State ---
+        const CONFIG = {
+            duration: 60,
+            molePopInterval: 800, 
+            moleStayDuration: 700,
+            boardSize: { cols: 3, rows: 2 },
+            spacing: 2.3
+        };
+
+        let state = {
+            isPlaying: false,
+            timeLeft: CONFIG.duration,
+            scores: { p1: 0, p2: 0 },
+            combos: { p1: 0, p2: 0 },
+            hammers: { p1: 0x4444FF, p2: 0xFF4444 },
+            moles: [], 
+            particles: []
+        };
+
+        let timerInterval;
+        let popLoop;
+
+        // --- Three.js Setup ---
+        const container = document.getElementById('game-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio for performance
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        dirLight.position.set(5, 15, 5);
+        dirLight.castShadow = true;
+        // Optimize shadow map
+        dirLight.shadow.mapSize.width = 1024;
+        dirLight.shadow.mapSize.height = 1024;
+        scene.add(dirLight);
+
+        // Raycaster
+        const raycaster = new THREE.Raycaster();
+
+        // --- Materials & Geometries (Shared for performance) ---
+        const moleMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+        const holeMaterial = new THREE.MeshBasicMaterial({ color: 0x111111 });
+        const boardMaterialP1 = new THREE.MeshLambertMaterial({ color: 0x1e3a8a });
+        const boardMaterialP2 = new THREE.MeshLambertMaterial({ color: 0x7f1d1d });
+        const moleGeometry = new THREE.CylinderGeometry(0.7, 0.7, 1.5, 24); // Low poly cylinder
+        const holeGeometry = new THREE.CircleGeometry(0.8, 24);
+        const eyeGeo = new THREE.SphereGeometry(0.12, 6, 6);
+        const eyeMat = new THREE.MeshBasicMaterial({color: 0x000000});
+
+        // --- Board Creation ---
+        function createPlayerZone(playerId, zOffset, isRotated) {
+            const group = new THREE.Group();
+            
+            // Base
+            const platformGeo = new THREE.BoxGeometry(8, 0.5, 5.5);
+            const platformMat = playerId === 1 ? boardMaterialP1 : boardMaterialP2;
+            const platform = new THREE.Mesh(platformGeo, platformMat);
+            platform.position.y = -0.25;
+            platform.receiveShadow = true;
+            group.add(platform);
+
+            const startX = -((CONFIG.boardSize.cols - 1) * CONFIG.spacing) / 2;
+            const startZ = -((CONFIG.boardSize.rows - 1) * CONFIG.spacing) / 2;
+
+            for (let r = 0; r < CONFIG.boardSize.rows; r++) {
+                for (let c = 0; c < CONFIG.boardSize.cols; c++) {
+                    const x = startX + c * CONFIG.spacing;
+                    const z = startZ + r * CONFIG.spacing;
+
+                    // Hole
+                    const hole = new THREE.Mesh(holeGeometry, holeMaterial);
+                    hole.rotation.x = -Math.PI / 2;
+                    hole.position.set(x, 0.01, z);
+                    group.add(hole);
+
+                    // Mole Group
+                    const moleGroup = new THREE.Group();
+                    moleGroup.position.set(x, -1.0, z);
+
+                    // Mole Mesh
+                    const mole = new THREE.Mesh(moleGeometry, moleMaterial.clone());
+                    
+                    const eye1 = new THREE.Mesh(eyeGeo, eyeMat);
+                    eye1.position.set(-0.25, 0.4, 0.65);
+                    const eye2 = eye1.clone();
+                    eye2.position.set(0.25, 0.4, 0.65);
+                    mole.add(eye1);
+                    mole.add(eye2);
+
+                    mole.castShadow = true;
+                    mole.userData = { 
+                        id: `p${playerId}_r${r}_c${c}`,
+                        playerId: playerId,
+                        isUp: false,
+                        isHit: false,
+                        originalY: -1.0,
+                        targetY: -1.0
+                    };
+                    
+                    // Invisible hit box (larger than mole for easier tapping)
+                    const hitBoxGeo = new THREE.CylinderGeometry(1.0, 1.0, 2.0, 8);
+                    const hitBoxMat = new THREE.MeshBasicMaterial({ visible: false });
+                    const hitBox = new THREE.Mesh(hitBoxGeo, hitBoxMat);
+                    hitBox.position.y = 0.5;
+                    moleGroup.add(hitBox);
+
+                    moleGroup.add(mole);
+                    group.add(moleGroup);
+                    
+                    state.moles.push({ mesh: moleGroup, data: mole.userData, material: mole.material, hitBox: hitBox });
+                }
+            }
+
+            group.position.z = zOffset;
+            if (isRotated) {
+                group.rotation.y = Math.PI;
+            }
+            scene.add(group);
+        }
+
+        function initBoard() {
+            createPlayerZone(1, 3.8, false);
+            createPlayerZone(2, -3.8, true);
+            updateCamera();
+        }
+
+        // --- Adaptive Camera ---
+        function updateCamera() {
+            const aspect = window.innerWidth / window.innerHeight;
+            camera.aspect = aspect;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            // Adjust camera Y based on aspect ratio to keep board visible
+            let targetY = 20; 
+            if (aspect < 0.6) { // Very narrow phones
+                targetY = 24;
+            } else if (aspect < 1) { // Normal portrait
+                targetY = 22;
+            } else { // Landscape
+                targetY = 16;
+            }
+            
+            camera.position.set(0, targetY, 8); // Offset Z slightly for perspective
+            camera.lookAt(0, 0, 0);
+        }
+
+        initBoard();
+
+        // --- Game Logic ---
+        function selectHammer(player, btn) {
+            const color = parseInt(btn.getAttribute('data-color'));
+            state.hammers[`p${player}`] = color;
+            const parent = player === 1 ? document.getElementById('p1-hammer-select') : document.getElementById('p2-hammer-select');
+            parent.querySelectorAll('.hammer-btn').forEach(b => b.classList.remove('hammer-selected'));
+            btn.classList.add('hammer-selected');
+        }
+
+        function startGame() {
+            document.getElementById('menu-screen').classList.add('hidden');
+            document.getElementById('game-ui').classList.remove('hidden');
+            state.isPlaying = true;
+            state.timeLeft = CONFIG.duration;
+            state.scores = { p1: 0, p2: 0 };
+            state.combos = { p1: 0, p2: 0 };
+            updateUI();
+
+            timerInterval = setInterval(() => {
+                state.timeLeft--;
+                document.getElementById('game-timer').innerText = state.timeLeft;
+                if (state.timeLeft <= 0) endGame();
+            }, 1000);
+
+            gameLoop();
+        }
+
+        function gameLoop() {
+            if (!state.isPlaying) return;
+            
+            popLoop = setTimeout(() => {
+                spawnRandomMole(1);
+                spawnRandomMole(2);
+                gameLoop();
+            }, Math.random() * 500 + 400);
+        }
+
+        function spawnRandomMole(playerId) {
+            const playerMoles = state.moles.filter(m => m.data.playerId === playerId && !m.data.isUp);
+            if (playerMoles.length === 0) return;
+
+            const randomMole = playerMoles[Math.floor(Math.random() * playerMoles.length)];
+            
+            randomMole.data.isUp = true;
+            randomMole.data.isHit = false;
+            randomMole.material.color.setHex(0x8B4513); 
+            randomMole.data.targetY = 0.5;
+
+            setTimeout(() => {
+                if (state.isPlaying && randomMole.data.isUp) {
+                    randomMole.data.targetY = randomMole.data.originalY;
+                    setTimeout(() => {
+                         randomMole.data.isUp = false; 
+                         if(!randomMole.data.isHit) {
+                             state.combos[`p${playerId}`] = 0;
+                             updateUI();
+                         }
+                    }, 300);
+                }
+            }, CONFIG.moleStayDuration);
+        }
+
+        function hitMole(moleObj) {
+            if (!moleObj.data.isUp || moleObj.data.isHit) return;
+
+            moleObj.data.isHit = true;
+            moleObj.data.targetY = moleObj.data.originalY;
+            moleObj.data.isUp = false;
+
+            const pid = moleObj.data.playerId;
+            state.scores[`p${pid}`] += 10 + (state.combos[`p${pid}`] * 2);
+            state.combos[`p${pid}`]++;
+            
+            updateUI();
+
+            // FIXED: Use World Position for precise effect placement (especially for rotated P2)
+            const vector = new THREE.Vector3();
+            moleObj.mesh.getWorldPosition(vector);
+
+            spawnHammerEffect(vector.x, vector.z, pid);
+            spawnParticles(vector.x, 0.5, vector.z, state.hammers[`p${pid}`]);
+        }
+
+        // --- FX ---
+        function spawnHammerEffect(x, z, playerId) {
+            const color = state.hammers[`p${playerId}`];
+            const hammerGroup = new THREE.Group();
+            
+            const headGeo = new THREE.BoxGeometry(1.0, 0.6, 0.6);
+            const headMat = new THREE.MeshLambertMaterial({ color: color, transparent: true, opacity: 1 });
+            const head = new THREE.Mesh(headGeo, headMat);
+            
+            const stickGeo = new THREE.CylinderGeometry(0.15, 0.15, 1.2);
+            const stickMat = new THREE.MeshLambertMaterial({ color: 0x8B4513, transparent: true, opacity: 1 });
+            const stick = new THREE.Mesh(stickGeo, stickMat);
+            stick.rotation.z = Math.PI / 2;
+            stick.position.x = 0.7;
+            
+            hammerGroup.add(head);
+            hammerGroup.add(stick);
+            hammerGroup.position.set(x, 1, z);
+            if (playerId === 2) hammerGroup.rotation.y = Math.PI;
+
+            scene.add(hammerGroup);
+
+            let frame = 0;
+            const animateHammer = () => {
+                frame++;
+                if (frame < 8) {
+                    hammerGroup.rotation.z -= 0.2; 
+                    hammerGroup.position.y -= 0.08;
+                } else if (frame < 16) {
+                    hammerGroup.rotation.z += 0.08; 
+                    hammerGroup.position.y += 0.08;
+                    hammerGroup.children.forEach(c => { if(c.material) c.material.opacity -= 0.12; });
+                } else {
+                    scene.remove(hammerGroup);
+                    return;
+                }
+                requestAnimationFrame(animateHammer);
+            };
+            animateHammer();
+        }
+
+        function spawnParticles(x, y, z, color) {
+            const particleCount = 6;
+            for(let i=0; i<particleCount; i++) {
+                const geo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+                const mat = new THREE.MeshBasicMaterial({ color: color });
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(x, y, z);
+                
+                const velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.3,
+                    Math.random() * 0.4,
+                    (Math.random() - 0.5) * 0.3
+                );
+                scene.add(mesh);
+                state.particles.push({ mesh, velocity, life: 1.0 });
+            }
+        }
+
+        // --- Multi-Touch Input Handling ---
+        
+        // Helper to check hits for a specific screen coordinate
+        function checkHit(clientX, clientY) {
+            const mouse = new THREE.Vector2();
+            mouse.x = (clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            // Check against invisible HitBoxes (better performance & user experience)
+            const hitBoxes = state.moles.map(m => m.hitBox);
+            const intersects = raycaster.intersectObjects(hitBoxes);
+
+            if (intersects.length > 0) {
+                const hitObj = intersects[0].object;
+                const moleObj = state.moles.find(m => m.hitBox === hitObj);
+                if (moleObj) {
+                    hitMole(moleObj);
+                }
+            }
+        }
+
+        // Touch event listener (Multi-touch)
+        window.addEventListener('touchstart', (event) => {
+            if (!state.isPlaying) return;
+            event.preventDefault(); // Stop scrolling/zooming
+
+            // Loop through ALL changed touches (allows multiple fingers at once)
+            for (let i = 0; i < event.changedTouches.length; i++) {
+                const touch = event.changedTouches[i];
+                checkHit(touch.clientX, touch.clientY);
+            }
+        }, { passive: false });
+
+        // Mouse fall-back for testing on PC
+        window.addEventListener('mousedown', (event) => {
+            if (!state.isPlaying) return;
+            checkHit(event.clientX, event.clientY);
+        });
+
+        function updateUI() {
+            document.getElementById('score-p1').innerText = state.scores.p1;
+            document.getElementById('score-p2').innerText = state.scores.p2;
+            document.getElementById('combo-p1').innerText = 'x' + state.combos.p1;
+            document.getElementById('combo-p2').innerText = 'x' + state.combos.p2;
+        }
+
+        function endGame() {
+            state.isPlaying = false;
+            clearInterval(timerInterval);
+            clearTimeout(popLoop);
+
+            document.getElementById('game-ui').classList.add('hidden');
+            document.getElementById('game-over-screen').classList.remove('hidden');
+            document.getElementById('final-score-p1').innerText = state.scores.p1;
+            document.getElementById('final-score-p2').innerText = state.scores.p2;
+
+            const winText = document.getElementById('winner-text');
+            if (state.scores.p1 > state.scores.p2) {
+                winText.innerText = "ผู้เล่น 1 ชนะ!";
+                winText.className = "text-5xl font-bold mb-4 text-blue-400";
+            } else if (state.scores.p2 > state.scores.p1) {
+                winText.innerText = "ผู้เล่น 2 ชนะ!";
+                winText.className = "text-5xl font-bold mb-4 text-red-400";
+            } else {
+                winText.innerText = "เสมอ!";
+                winText.className = "text-5xl font-bold mb-4 text-gray-200";
+            }
+        }
+
+        function resetGame() {
+            document.getElementById('game-over-screen').classList.add('hidden');
+            document.getElementById('menu-screen').classList.remove('hidden');
+            state.moles.forEach(m => {
+                m.data.isUp = false;
+                m.data.targetY = m.data.originalY;
+                m.mesh.position.y = m.data.originalY;
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            // Moles
+            state.moles.forEach(m => {
+                m.mesh.position.y += (m.data.targetY - m.mesh.position.y) * 0.2;
+            });
+            // Particles
+            for (let i = state.particles.length - 1; i >= 0; i--) {
+                const p = state.particles[i];
+                p.mesh.position.add(p.velocity);
+                p.velocity.y -= 0.015;
+                p.life -= 0.03;
+                p.mesh.rotation.x += 0.1;
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    state.particles.splice(i, 1);
+                } else {
+                    p.mesh.scale.setScalar(p.life);
+                }
+            }
+            renderer.render(scene, camera);
+        }
+
+        window.addEventListener('resize', updateCamera);
+        animate();
+
+    </script>
+</body>
+</html>
