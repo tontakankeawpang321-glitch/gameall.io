@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Wizard Chess 3D - Mobile Ready</title>
+    <title>Wizard Chess 3D - Model Loading Edition</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- เพิ่ม GLTFLoader สำหรับโหลดไฟล์ .glb -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', 'Kanit', Tahoma, Geneva, Verdana, sans-serif; background: #e5e7eb; touch-action: none; }
         
@@ -51,6 +53,19 @@
             z-index: 100;
         }
 
+        #loading-screen {
+            position: absolute;
+            inset: 0;
+            background: #f3f4f6;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            font-weight: bold;
+            color: #1f2937;
+        }
+
         @media (max-width: 600px) {
             #voice-btn {
                 bottom: 20px;
@@ -94,6 +109,11 @@
 </head>
 <body>
 
+<div id="loading-screen">
+    <div style="font-size: 24px; margin-bottom: 10px;">กำลังเตรียมสมรภูมิเวทมนตร์...</div>
+    <div id="loading-progress" style="font-size: 14px; color: #6b7280;">กำลังโหลดโมเดล 3 มิติ</div>
+</div>
+
 <div id="ui-layer">
     <div class="status-panel">
         <div id="turn-indicator">ตาของ: สีน้ำเงิน</div>
@@ -109,7 +129,7 @@
 <div id="message-box"></div>
 
 <script>
-/** * Wizard Chess 3D - Mobile Portrait Optimized
+/** * Wizard Chess 3D - GLB Loader Integration
  */
 
 let scene, camera, renderer, raycaster, mouse;
@@ -118,10 +138,21 @@ let pieces = [];
 let selectedPiece = null;
 let currentTurn = 'white'; 
 let moveHighlights = [];
+let modelTemplates = {}; // สำหรับเก็บโมเดลที่โหลดมาแล้ว
 
 const PIECES = {
     EMPTY: 0,
     PAWN: 1, ROOK: 2, KNIGHT: 3, BISHOP: 4, QUEEN: 5, KING: 6
+};
+
+// กำหนด Path สำหรับโมเดล .glb (ผู้ใช้สามารถแก้ไข URL ตรงนี้ได้)
+const MODEL_PATHS = {
+    [PIECES.PAWN]: 'https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/models/gltf/RobotExpressive/RobotExpressive.glb', // ตัวอย่าง URL
+    [PIECES.ROOK]: '',
+    [PIECES.KNIGHT]: '',
+    [PIECES.BISHOP]: '',
+    [PIECES.QUEEN]: '',
+    [PIECES.KING]: ''
 };
 
 const THAI_PIECES = {
@@ -150,13 +181,40 @@ let gameState = [
 let recognition;
 let isListening = false;
 
-window.onload = function() {
+window.onload = async function() {
     init();
     createBoard();
+    await loadAllModels(); // รอโหลดโมเดลให้เสร็จก่อน
     createPieces();
     initSpeech();
+    
+    // ซ่อนหน้าจอโหลด
+    document.getElementById('loading-screen').style.display = 'none';
     animate();
 };
+
+async function loadAllModels() {
+    const loader = new THREE.GLTFLoader();
+    const loadPromises = Object.entries(MODEL_PATHS).map(([type, url]) => {
+        if (!url) return Promise.resolve(null);
+        
+        return new Promise((resolve) => {
+            loader.load(url, 
+                (gltf) => {
+                    modelTemplates[type] = gltf.scene;
+                    resolve(true);
+                },
+                undefined,
+                (error) => {
+                    console.warn(`Failed to load model for type ${type}:`, error);
+                    resolve(false);
+                }
+            );
+        });
+    });
+
+    await Promise.all(loadPromises);
+}
 
 function initSpeech() {
     window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -270,11 +328,9 @@ function init() {
 function adjustCamera() {
     const aspect = window.innerWidth / window.innerHeight;
     if (aspect < 1) {
-        // Portrait
         camera.fov = 65; 
         camera.position.set(0, 14, 6);
     } else {
-        // Landscape
         camera.fov = 45;
         camera.position.set(0, 13, 8);
     }
@@ -305,6 +361,28 @@ function createBoard() {
 }
 
 function createPieceMesh(type, color) {
+    const absType = Math.abs(type);
+    
+    // ถ้ามีโมเดล .glb ที่โหลดมา ให้ใช้โมเดลนั้น
+    if (modelTemplates[absType]) {
+        const model = modelTemplates[absType].clone();
+        
+        // ปรับแต่งสี (ต้องเจาะจง Mesh ภายในโมเดล)
+        model.traverse((node) => {
+            if (node.isMesh) {
+                node.material = node.material.clone();
+                node.material.color.set(color === 'white' ? 0x2563eb : 0x1f2937);
+                node.castShadow = true;
+                node.receiveShadow = true;
+            }
+        });
+
+        // ปรับ Scale ให้พอดีกับช่อง (ค่าสมมติ ต้องปรับตามโมเดลจริง)
+        model.scale.set(0.4, 0.4, 0.4);
+        return model;
+    }
+
+    // Fallback: ใช้รูปทรงพื้นฐานหากไม่มีโมเดล
     const group = new THREE.Group();
     const mat = new THREE.MeshStandardMaterial({ 
         color: color === 'white' ? 0x2563eb : 0x1f2937,
@@ -313,8 +391,6 @@ function createPieceMesh(type, color) {
     });
 
     let body;
-    const absType = Math.abs(type);
-    
     if (absType === PIECES.PAWN) {
         body = new THREE.Mesh(new THREE.SphereGeometry(0.28, 20, 20), mat);
         body.position.y = 0.5;
@@ -348,7 +424,7 @@ function createPieceMesh(type, color) {
     group.add(base);
     
     group.traverse(n => { if(n.isMesh) { n.castShadow = true; n.receiveShadow = true; } });
-    return group;
+    return group;group;
 }
 
 function createPieces() {
