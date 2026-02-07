@@ -1,1 +1,475 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wizard Chess 3D - Classic Board Edition</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', 'Kanit', Tahoma, Geneva, Verdana, sans-serif; background: #e5e7eb; }
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #111827;
+            pointer-events: none;
+            text-shadow: 0 1px 2px rgba(255,255,255,0.8);
+        }
+        .status-panel {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #d1d5db;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            pointer-events: auto;
+            min-width: 220px;
+        }
+        #turn-indicator { font-size: 22px; font-weight: bold; margin-bottom: 5px; color: #3498db; }
+        #info { font-size: 13px; color: #4b5563; line-height: 1.5; }
+        #voice-status { margin-top: 10px; font-style: italic; color: #059669; font-weight: bold; }
+        
+        #voice-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(59, 130, 246, 0.4);
+            transition: all 0.3s;
+            pointer-events: auto;
+        }
+        #voice-btn:hover { background: #2563eb; transform: scale(1.05); }
+        #voice-btn.listening { background: #dc2626; animation: pulse 1.5s infinite; }
 
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(220, 38, 38, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+        }
+
+        #message-box {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(17, 24, 39, 0.95);
+            color: #fff;
+            padding: 12px 25px;
+            border-radius: 30px;
+            display: none;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui-layer">
+    <div class="status-panel">
+        <div id="turn-indicator">ตาของ: สีน้ำเงิน</div>
+        <div id="info">
+            กระดานดำ-ขาว: คลิกเดิน หรือใช้เสียง:<br>
+            "ม้ากินเรือ", "เบี้ยกินม้า", "ควีนกินเรือ"
+        </div>
+        <div id="voice-status"></div>
+    </div>
+</div>
+
+<button id="voice-btn" onclick="toggleVoice()">🎤 เปิดไมค์สั่งการ</button>
+<div id="message-box"></div>
+
+<script>
+/** * Wizard Chess 3D - Classic Black & White Board
+ */
+
+let scene, camera, renderer, raycaster, mouse;
+let board = [];
+let pieces = [];
+let selectedPiece = null;
+let currentTurn = 'white'; // white (Blue) starts
+let moveHighlights = [];
+
+const PIECES = {
+    EMPTY: 0,
+    PAWN: 1, ROOK: 2, KNIGHT: 3, BISHOP: 4, QUEEN: 5, KING: 6
+};
+
+const THAI_PIECES = {
+    'เบี้ย': PIECES.PAWN,
+    'เรือ': PIECES.ROOK,
+    'ม้า': PIECES.KNIGHT,
+    'บิชอป': PIECES.BISHOP,
+    'โคน': PIECES.BISHOP,
+    'ควีน': PIECES.QUEEN,
+    'เม็ด': PIECES.QUEEN,
+    'ขุน': PIECES.KING,
+    'คิง': PIECES.KING
+};
+
+let gameState = [
+    [-2, -3, -4, -5, -6, -4, -3, -2],
+    [-1, -1, -1, -1, -1, -1, -1, -1],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0],
+    [1, 1, 1, 1, 1, 1, 1, 1],
+    [2, 3, 4, 5, 6, 4, 3, 2]
+];
+
+let recognition;
+let isListening = false;
+
+window.onload = function() {
+    init();
+    createBoard();
+    createPieces();
+    initSpeech();
+    animate();
+};
+
+function initSpeech() {
+    window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (window.SpeechRecognition) {
+        recognition = new SpeechRecognition();
+        recognition.lang = 'th-TH';
+        recognition.interimResults = false;
+        
+        recognition.onresult = (event) => {
+            const command = event.results[0][0].transcript;
+            document.getElementById('voice-status').innerText = `สั่งว่า: "${command}"`;
+            processVoiceCommand(command.trim());
+        };
+
+        recognition.onend = () => { if (isListening) recognition.start(); };
+        recognition.onerror = (event) => { console.error('Speech error:', event.error); };
+    } else {
+        document.getElementById('voice-btn').style.display = 'none';
+    }
+}
+
+function toggleVoice() {
+    if (!recognition) return;
+    const btn = document.getElementById('voice-btn');
+    if (!isListening) {
+        recognition.start();
+        isListening = true;
+        btn.innerText = "🛑 กำลังฟัง...";
+        btn.classList.add('listening');
+    } else {
+        recognition.stop();
+        isListening = false;
+        btn.innerText = "🎤 เปิดไมค์สั่งการ";
+        btn.classList.remove('listening');
+        document.getElementById('voice-status').innerText = "";
+    }
+}
+
+function processVoiceCommand(text) {
+    if (!text.includes('กิน')) return;
+    const parts = text.split('กิน');
+    if (parts.length < 2) return;
+
+    const attackerName = parts[0].trim();
+    const victimName = parts[1].trim();
+
+    const attackerType = THAI_PIECES[Object.keys(THAI_PIECES).find(k => attackerName.includes(k))];
+    const victimType = THAI_PIECES[Object.keys(THAI_PIECES).find(k => victimName.includes(k))];
+
+    if (!attackerType || !victimType) {
+        showMessage("ไม่เข้าใจชื่อหมากครับ");
+        return;
+    }
+
+    let foundMove = null;
+    const myPieces = pieces.filter(p => p.color === currentTurn && p.type === attackerType);
+    
+    for (const p of myPieces) {
+        const potentialVictims = pieces.filter(v => v.color !== currentTurn && v.type === victimType);
+        for (const v of potentialVictims) {
+            if (isValidMove(p, v.row, v.col)) {
+                foundMove = { attacker: p, targetRow: v.row, targetCol: v.col };
+                break;
+            }
+        }
+        if (foundMove) break;
+    }
+
+    if (foundMove) {
+        movePiece(foundMove.attacker, foundMove.targetRow, foundMove.targetCol);
+    } else {
+        showMessage(`ไม่พบ ${attackerName} ที่สามารถกิน ${victimName} ได้`);
+    }
+}
+
+function init() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xd1d5db);
+    scene.fog = new THREE.Fog(0xd1d5db, 10, 50);
+
+    camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 13, 8);
+    camera.lookAt(0, -1.5, 0);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.75); 
+    scene.add(ambientLight);
+
+    const mainLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    mainLight.position.set(5, 15, 5);
+    mainLight.castShadow = true;
+    mainLight.shadow.mapSize.width = 2048;
+    mainLight.shadow.mapSize.height = 2048;
+    scene.add(mainLight);
+
+    raycaster = new THREE.Raycaster();
+    mouse = new THREE.Vector2();
+
+    window.addEventListener('mousedown', onMouseDown, false);
+    window.addEventListener('resize', onWindowResize, false);
+}
+
+function createBoard() {
+    const size = 1;
+    for (let r = 0; r < 8; r++) {
+        board[r] = [];
+        for (let c = 0; c < 8; c++) {
+            const isDark = (r + c) % 2 === 1;
+            const geo = new THREE.BoxGeometry(size, 0.2, size);
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: isDark ? 0x222222 : 0xffffff, // ปรับเป็น ดำ และ ขาว
+                roughness: 0.05,
+                metalness: 0.1
+            });
+            const tile = new THREE.Mesh(geo, mat);
+            tile.position.set(c - 3.5, 0, r - 3.5);
+            tile.receiveShadow = true;
+            tile.userData = { type: 'tile', row: r, col: c };
+            scene.add(tile);
+            board[r][c] = tile;
+        }
+    }
+}
+
+function createPieceMesh(type, color) {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ 
+        color: color === 'white' ? 0x2563eb : 0x1f2937, // น้ำเงิน และ เทาดำ
+        roughness: 0.2,
+        metalness: 0.4
+    });
+
+    let body;
+    const absType = Math.abs(type);
+    
+    if (absType === PIECES.PAWN) {
+        body = new THREE.Mesh(new THREE.SphereGeometry(0.28, 24, 24), mat);
+        body.position.y = 0.5;
+    } else if (absType === PIECES.ROOK) {
+        body = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.35, 0.8, 24), mat);
+        body.position.y = 0.5;
+    } else if (absType === PIECES.KNIGHT) {
+        body = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.7, 0.45), mat);
+        body.position.y = 0.45;
+    } else if (absType === PIECES.BISHOP) {
+        body = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.35, 0.9, 24), mat);
+        body.position.y = 0.55;
+    } else if (absType === PIECES.QUEEN) {
+        body = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.38, 1.1, 24), mat);
+        const top = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.08, 16, 32), mat);
+        top.rotation.x = Math.PI/2;
+        top.position.y = 0.6;
+        body.add(top);
+        body.position.y = 0.6;
+    } else if (absType === PIECES.KING) {
+        body = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.4, 1.3, 24), mat);
+        const top = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.1), mat);
+        top.position.y = 0.7;
+        body.add(top);
+        body.position.y = 0.7;
+    }
+    
+    group.add(body);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.42, 0.15, 32), mat);
+    base.position.y = 0.075;
+    group.add(base);
+    
+    group.traverse(n => { if(n.isMesh) { n.castShadow = true; n.receiveShadow = true; } });
+    return group;
+}
+
+function createPieces() {
+    pieces.forEach(p => scene.remove(p.mesh));
+    pieces = [];
+
+    for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+            const val = gameState[r][c];
+            if (val !== 0) {
+                const color = val > 0 ? 'white' : 'black';
+                const mesh = createPieceMesh(val, color);
+                mesh.position.set(c - 3.5, 0, r - 3.5);
+                scene.add(mesh);
+                pieces.push({ mesh, row: r, col: c, color, type: Math.abs(val) });
+            }
+        }
+    }
+}
+
+function onMouseDown(event) {
+    if (event.button !== 0) return;
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const intersects = raycaster.intersectObjects(scene.children, true);
+    if (intersects.length > 0) {
+        let object = intersects[0].object;
+        while (object.parent && !object.userData.type && object.parent !== scene) object = object.parent;
+        let clickedTile = null;
+        if (object.userData.type === 'tile') {
+            clickedTile = object.userData;
+        } else {
+            const piece = pieces.find(p => p.mesh === object || p.mesh.children.includes(object));
+            if (piece) clickedTile = { row: piece.row, col: piece.col };
+        }
+        if (clickedTile) handleInteraction(clickedTile.row, clickedTile.col);
+    }
+}
+
+function handleInteraction(r, c) {
+    const pieceAtPos = pieces.find(p => p.row === r && p.col === c);
+    if (selectedPiece) {
+        if (isValidMove(selectedPiece, r, c)) {
+            movePiece(selectedPiece, r, c);
+            selectedPiece = null;
+            clearHighlights();
+        } else if (pieceAtPos && pieceAtPos.color === currentTurn) {
+            selectPiece(pieceAtPos);
+        } else {
+            selectedPiece = null;
+            clearHighlights();
+        }
+    } else if (pieceAtPos && pieceAtPos.color === currentTurn) {
+        selectPiece(pieceAtPos);
+    }
+}
+
+function selectPiece(piece) {
+    clearHighlights();
+    selectedPiece = piece;
+    const geo = new THREE.RingGeometry(0.45, 0.5, 32);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, side: THREE.DoubleSide });
+    const ring = new THREE.Mesh(geo, mat);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(piece.col - 3.5, 0.15, piece.row - 3.5);
+    scene.add(ring);
+    moveHighlights.push(ring);
+}
+
+function clearHighlights() {
+    moveHighlights.forEach(h => scene.remove(h));
+    moveHighlights = [];
+}
+
+function isValidMove(piece, targetR, targetC) {
+    if (piece.row === targetR && piece.col === targetC) return false;
+    const dr = targetR - piece.row;
+    const dc = targetC - piece.col;
+    const targetPiece = pieces.find(p => p.row === targetR && p.col === targetC);
+    if (targetPiece && targetPiece.color === piece.color) return false;
+
+    switch(piece.type) {
+        case PIECES.PAWN:
+            const dir = piece.color === 'white' ? -1 : 1;
+            if (dc === 0 && !targetPiece) {
+                if (dr === dir) return true;
+                if (dr === 2 * dir && ((piece.color === 'white' && piece.row === 6) || (piece.color === 'black' && piece.row === 1))) {
+                    return !pieces.find(p => p.row === piece.row + dir && p.col === piece.col);
+                }
+            }
+            if (Math.abs(dc) === 1 && dr === dir && targetPiece) return true;
+            return false;
+        case PIECES.ROOK:
+            if (dr !== 0 && dc !== 0) return false;
+            return isPathClear(piece.row, piece.col, targetR, targetC);
+        case PIECES.BISHOP:
+            if (Math.abs(dr) !== Math.abs(dc)) return false;
+            return isPathClear(piece.row, piece.col, targetR, targetC);
+        case PIECES.KNIGHT:
+            return (Math.abs(dr) === 2 && Math.abs(dc) === 1) || (Math.abs(dr) === 1 && Math.abs(dc) === 2);
+        case PIECES.QUEEN:
+            if (dr !== 0 && dc !== 0 && Math.abs(dr) !== Math.abs(dc)) return false;
+            return isPathClear(piece.row, piece.col, targetR, targetC);
+        case PIECES.KING:
+            return Math.abs(dr) <= 1 && Math.abs(dc) <= 1;
+    }
+    return true;
+}
+
+function isPathClear(r1, c1, r2, c2) {
+    const dr = Math.sign(r2 - r1);
+    const dc = Math.sign(c2 - c1);
+    let currR = r1 + dr;
+    let currC = c1 + dc;
+    while (currR !== r2 || currC !== c2) {
+        if (pieces.find(p => p.row === currR && p.col === currC)) return false;
+        currR += dr;
+        currC += dc;
+    }
+    return true;
+}
+
+function movePiece(piece, r, c) {
+    const targetPiece = pieces.find(p => p.row === r && p.col === c);
+    if (targetPiece) {
+        showMessage(`หมาก${piece.color === 'white' ? 'น้ำเงิน' : 'เทาดำ'} กินสำเร็จ!`);
+        scene.remove(targetPiece.mesh);
+        pieces = pieces.filter(p => p !== targetPiece);
+    }
+    gameState[piece.row][piece.col] = 0;
+    piece.row = r;
+    piece.col = c;
+    gameState[r][c] = piece.color === 'white' ? piece.type : -piece.type;
+    piece.mesh.position.set(c - 3.5, 0, r - 3.5);
+    currentTurn = currentTurn === 'white' ? 'black' : 'white';
+    updateUI();
+}
+
+function updateUI() {
+    const indicator = document.getElementById('turn-indicator');
+    indicator.innerText = `ตาของ: สี${currentTurn === 'white' ? 'น้ำเงิน' : 'เทาดำ'}`;
+    indicator.style.color = currentTurn === 'white' ? '#2563eb' : '#1f2937';
+}
+
+function showMessage(msg) {
+    const box = document.getElementById('message-box');
+    box.innerText = msg;
+    box.style.display = 'block';
+    setTimeout(() => { box.style.display = 'none'; }, 2500);
+}
+
+function onWindowResize() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animate() {
+    requestAnimationFrame(animate);
+    moveHighlights.forEach(h => { h.rotation.z += 0.05; });
+    renderer.render(scene, camera);
+}
+</script>
+</body>
+</html>
